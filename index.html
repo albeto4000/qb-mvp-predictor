@@ -1661,25 +1661,9 @@ want our model to think less of Manning in 2003.”</p>
 load the statistics for teams, schedules and players in the years
 between 2003 and 2024. I will also load dplyr and tidyr for their data
 manipulation and cleaning functions.</p>
-<pre class="r"><code>library(nflverse)</code></pre>
-<pre><code>## ── Attaching packages ──────────────────────────────────────── nflverse 1.0.3 ──</code></pre>
-<pre><code>## ✔ nflfastR 4.6.1     ✔ nflreadr 1.4.1
-## ✔ nflseedR 1.2.0     ✔ nflplotR 1.4.0
-## ✔ nfl4th   1.0.4</code></pre>
-<pre><code>## ──────────────────────────────────────────────────────────────── Ready to go! ──</code></pre>
-<pre class="r"><code>library(dplyr)</code></pre>
-<pre><code>## 
-## Attaching package: &#39;dplyr&#39;</code></pre>
-<pre><code>## The following objects are masked from &#39;package:stats&#39;:
-## 
-##     filter, lag</code></pre>
-<pre><code>## The following objects are masked from &#39;package:base&#39;:
-## 
-##     intersect, setdiff, setequal, union</code></pre>
-<pre class="r"><code>library(tidyr)
-
-#This removes the warning when using summarize with group_by
-options(dplyr.summarise.inform = FALSE)</code></pre>
+<pre class="r"><code>library(nflverse)
+library(dplyr)
+library(tidyr)</code></pre>
 <p>Next, I’ll write a function to load the regular season statistics of
 interest for all QBs. It’s highly unlikely for a backup quarterback to
 be voted MVP, so I’ll limit my results to only quarterbacks who threw at
@@ -1844,7 +1828,7 @@ set.seed(26)
 train &lt;- df[df[&#39;season&#39;] &lt; 2020,]
 test &lt;- df[df[&#39;season&#39;] &lt; 2024,]
 
-model &lt;- suppressWarnings(glm(mvp ~ tot_td_rank + tot_yard_rank + epa_rank + win_rank + sov + avg_comp_pct - ints, family = &#39;binomial&#39;, data = train))
+model &lt;- glm(mvp ~ tot_td_rank + tot_yard_rank + epa_rank + win_rank + sov + avg_comp_pct - ints, family = &#39;binomial&#39;, data = train)
 
 summary(model)</code></pre>
 <pre><code>## 
