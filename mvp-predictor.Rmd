@@ -1,0 +1,215 @@
+---
+title: "2024 NFL MVP Predictor"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  html_notebook: default
+---
+
+<img src='https://ng-sportingnews.com/s3/files/styles/crop_style_16_9_desktop/s3/2025-01/MVP-Breakdown-FTR.jpg?h=920929c4&itok=ltMneWUI'></img>
+<br />
+<i>Image Source: https://www.sportingnews.com/us/nfl/news/nfl-mvp-odds-stats-comparison-allen-jackson-burrow-barkley/ff4fb064efb79163d63b2f02</i>
+
+This is a project designed to predict the NFL MVP using machine learning techniques. I will be repeating the process described by Ryan Brill and Ryan Weisman in their 2021 paper <a href='https://wsb.wharton.upenn.edu/wp-content/uploads/2022/09/2022_Football_Brill_PredictingMVP.pdf'>"Predicting the Quarterback-MVP"</a>, which uses logistic regression to predict which QB is statistically most likely to receive the MVP title each year. 
+
+Brill and Weisman use the following parameters in their model: 
+<ul>
+  <li>tot_td_rank: a rank of the QB's total touchdowns</li>
+  <li>tot_yard_rank: a rank of the QB's total yards (rushing + passing)</li>
+  <li>win_rank: a rank of the QB's team's number of wins</li>
+  <li>epa_rank: a rank of the QB's expected points added per play</li>
+  <li>tot_ints: the number of interceptions thrown by the QB in a given year</li>
+</ul>
+
+Ranks are used over the number of touchdowns, yards, wins, and epa due to stat inflation over time. To quote Brill and Weisman, "in 2003 Peyton Manning threw for a league­high
+4267 yards, whereas in 2016 Drew Brees threw for a league­high 5208 yards. Over the last 20 years, the average number of passing yards has experienced inflation, but we don’t want our model to think less of Manning in 2003." 
+
+I will begin by loading the nflverse library, which will allow me to load the statistics for teams, schedules and players in the years between 2003 and 2024. I will also load dplyr and tidyr for their data manipulation and cleaning functions. 
+```{r}
+library(nflverse)
+library(dplyr)
+library(tidyr)
+
+#This removes the warning when using summarize with group_by
+options(dplyr.summarise.inform = FALSE)
+```
+
+Next, I'll write a function to load the regular season statistics of interest for all QBs. It's highly unlikely for a backup quarterback to be voted MVP, so I'll limit my results to only quarterbacks who threw at least 150 passes. This dataset differentiates between rushing, passing, and receiving statistics, so I will sum rushing and passing to get total yards, touchdowns, and EPA for each QB. While Bo Nix, Jared Goff, and Josh Allen all had a receiving touchdown this year, I believe this information has little impact on MVP voting, so I will not include receiving stats in my model. 
+
+Brill and Weisman used win_rank as a predictor variable in their model. I also calculated strength of victory (SOV), which I believe tells a more complete story of a quarterback's season. Strength of victory is the sum of the win percentages of all teams a QB wins against divided by the number of wins the QB's team has. To calculate this, I will use the schedule data to calculate each team's wins, losses, and ties. I'll also calculate average completion percentage, an important statistic for comparing quarterbacks. I calculate their completion percentage per game as the number of completed passes divided by the number of attempted passes, then average those values across the season. 
+```{r}
+#This function inputs a year and returns the QB stats of interest for that season
+gen_player_stats <- function(year){
+  #Loads all player data from the given year
+  players <- load_player_stats(year)
+  
+  #Selects only the statistics of interest from all quarterbacks who attempted at least 150 passes
+  qb_data <- players[players$position == 'QB' & sum(players$attempts) >= 150 & players$season_type == 'REG', c('recent_team', 'player_display_name', 'week', 'completions', 'attempts', 'passing_tds', 'rushing_tds', 'passing_yards', 'rushing_yards', 'passing_epa', 'rushing_epa', 'interceptions', 'carries')]
+  
+  #Summarizes the statistics to get season totals for all QBs
+  qb_data <- qb_data %>%
+    #Replaces NA numeric values with 0 (NA denotes the player did not play that week, which is unimportant for season totals)
+    replace_na(list(passing_tds = 0, rushing_tds = 0, passing_yards = 0, rushing_yards = 0, passing_epa = 0, rushing_epa = 0, interceptions = 0, carries = 0)) %>%
+    #Groups data by player name
+    group_by(recent_team, player_display_name) %>%
+    #Sums the numeric values for each week to get season totals
+    summarize(tot_td = sum(passing_tds + rushing_tds), tot_yard = sum(passing_yards + rushing_yards), epa = sum(passing_epa + rushing_epa), ints = sum(interceptions), avg_comp_pct = round(mean(completions/attempts), 4), avg_ypc = round(sum(rushing_yards)/sum(carries), 4)) %>%
+    #If name groups are present, rank will assign each quarterback rank 1 because they are the best performing QB with their name
+    #Ungroup removes the groupings in order to rank tds, yards, and epa among all QBs
+    ungroup() %>%
+    #Ranks total touchdowns, yards, and epa from highest to lowest
+    mutate(tot_td_rank = rank(-tot_td, ties.method = 'min'), tot_yard_rank = rank(-tot_yard, ties.method = 'min'), epa_rank = rank(-epa, ties.method = 'min'))
+  
+  #Removes the total touchdowns, yards, and epa columns in favor of the rank columns
+  qb_data <- subset(qb_data, select = -c(tot_td, tot_yard, epa))
+  
+  #Loads 2024 schedule
+  schedule <- load_schedules()
+  #Selects the season, week, teams, and scores for all regular season games
+  schedule <- schedule[schedule$game_type == 'REG' & schedule$season == year,c('season', 'week', 'away_team', 'away_score', 'home_team', 'home_score')]
+  
+  #Loads team abbreviated name, team name, and division for all current teams
+  teams <- load_teams(current = FALSE)[,c('team_abbr', 'team_name', 'team_division')]
+  
+  #Creates a column denoting which teams won each game (or NA if tie)
+  schedule$win <- if_else(schedule$home_score == schedule$away_score, 'Tie', if_else(schedule$home_score > schedule$away_score, schedule$home_team, schedule$away_team))
+  #Creates a column denoting which teams lost each each game (or NA if tie)
+  schedule$loss <- if_else(schedule$home_score == schedule$away_score, 'Tie', if_else(schedule$home_score < schedule$away_score, schedule$home_team, schedule$away_team))
+  #Creates a boolean column which is true if the game ends in a tie
+  schedule$tie <- schedule$home_score == schedule$away_score
+  
+  #Adds columns counting each team's wins and losses to the teams dataframe
+  teams <- merge(teams, as.data.frame(table(schedule$win)), by.x = 'team_abbr', by.y = 'Var1', all = TRUE)
+  teams <- merge(teams, as.data.frame(table(schedule$loss)), by.x = 'team_abbr', by.y = 'Var1', all = TRUE)
+  
+  #Counts the amount of times each team ties in the current season and adds it as a column to the teams dataframe
+  #Or sets ties to 0 if there are no tie games in the current season
+  ties <- table(c(schedule[schedule$tie,][['home_team']], schedule[schedule$tie,][['away_team']]))
+  if(nrow(ties) > 0){
+    teams <- merge(teams, as.data.frame(ties), by.x = 'team_abbr', by.y = 'Var1', all = TRUE)
+  } else {
+    teams$Freq <- 0
+  }
+  
+  #Sets the column names
+  colnames(teams) <- c('abbr', 'name', 'division', 'wins', 'losses', 'ties')
+  
+  #Replaces NA (team did not win/lose/tie) values with 0
+  teams <- teams %>%
+    mutate(wins = replace_na(wins, 0), losses = replace_na(losses, 0), ties = replace_na(ties, 0), win_rank = rank(-wins, ties.method = 'min'))
+  
+  #Calculates record as total wins + 0.5 for all ties, divided by total games played
+  teams$record <- (teams$wins + (0.5 * teams$ties)) / (teams$wins + teams$losses + teams$ties)
+  
+  #Merges the winners and losers of each game with the records for the losing team (for calculating SOV)
+  losses <- merge(data.frame(schedule[,c('win', 'loss')]), teams, by.x = 'loss', by.y = 'abbr', all.x = TRUE)
+  #Creates a column for strength of victory
+  teams$sov <- 0
+  
+  #Calculates the strength of victory for each team as the mean record of all teams they beat
+  for(sov_team in teams$abbr){
+    if(teams[teams$abbr == sov_team, 'wins'] > 0){
+      teams[teams$abbr == sov_team, 'sov'] <- sum(losses[losses$win == sov_team,][['record']]) / teams[teams$abbr == sov_team, 'wins']
+    }
+  }
+  
+  #Cleans names/abbreviations for teams that moved (LAR, OAK, STL, SD)
+  #LAR/STL becomes LA, SD becomes LAC, OAK becomes LV
+  if(year < 2016){
+    teams[teams$abbr == 'LAR' | teams$abbr == 'STL', 'abbr'] <- 'LA'
+    teams$abbr[teams$abbr == 'LAR' | teams$abbr == 'STL'] <- 'LA'
+  }
+  if(year < 2017){
+    teams$abbr[teams$abbr == 'SD'] <- 'LAC'
+  }
+  if(year < 2020){
+    teams$abbr[teams$abbr == 'OAK'] <- 'LV'
+  }
+  
+  #Removes teams that didn't exist in a given year
+  teams <- teams[(teams$wins > 0 | teams$losses > 0) & teams$abbr != 'Tie',]
+  
+  #Merges QB data with team wins to measure how many games each QB's team won
+  df <- merge(qb_data, teams[,c('abbr', 'wins', 'sov', 'win_rank')], by.x = 'recent_team', by.y = 'abbr')
+  
+  #Creates a column to track the season
+  df$season <- year
+  
+  #Returns the QB stat dataframe
+  return(df)
+}
+```
+
+The gen_player_stats function is used to load all stats for each of the years between 2003 and 2024 that a QB won MVP. The award was given to a running back in 2005, 2006, and 2012, so I will exclude that data. After the data is loaded, I will mark which QB won the MVP award each year by creating a new column, MVP, and assigning each a value of 1. 
+```{r}
+df <- gen_player_stats(2003)
+
+for (year in 2004:get_latest_season()){
+  #Excludes all years where a running back won MVP
+  if (year != 2005 && year != 2006 && year != 2012){
+    df <- rbind(df, gen_player_stats(year))
+  }
+}
+
+#Hard codes all of the AP MVP winners from 2003 - 2023
+df$mvp <- 0
+
+df[df$player_display_name == 'Steve McNair' & df$season == 2003, 'mvp'] <- 1
+df[df$player_display_name == 'Peyton Manning' & df$season %in% c(2003, 2004, 2008, 2009, 2013), 'mvp'] <- 1
+df[df$player_display_name == 'Tom Brady' & df$season %in% c(2007, 2010, 2017), 'mvp'] <- 1
+df[df$player_display_name == 'Aaron Rodgers' & df$season %in% c(2011, 2014, 2020, 2021), 'mvp'] <- 1
+df[df$player_display_name == 'Cam Newton' & df$season == 2015, 'mvp'] <- 1
+df[df$player_display_name == 'Matt Ryan' & df$season == 2016, 'mvp'] <- 1
+df[df$player_display_name == 'Patrick Mahomes' & df$season %in% c(2018, 2022), 'mvp'] <- 1
+df[df$player_display_name == 'Lamar Jackson' & df$season %in% c(2019, 2023), 'mvp'] <- 1
+
+df[df$mvp == 1,]
+```
+
+Next, I train a logistic regression model (glm with binomial family) using the statistics calculated above. I trained the data on all of the data before 2019, then tested on all of the data before 2024. I tested with all of the data to measure accuracy over 18 years rather than 5 years. 
+```{r}
+#Sets the random seed to 26 so the results are repeatable
+#26 was chosen as it is Saquon Barkeley's jersey number (Go Birds)
+set.seed(26)
+
+train <- df[df['season'] < 2020,]
+test <- df[df['season'] < 2024,]
+
+model <- suppressWarnings(glm(mvp ~ tot_td_rank + tot_yard_rank + epa_rank + win_rank + sov + avg_comp_pct - ints, family = 'binomial', data = train))
+
+summary(model)
+```
+The model summary displays the p-value of each variable, with a smaller p-value indicating a higher weight on that variable. We can see that epa_rank and win_rank are the most important variables when determining who the QB MVP should be. 
+```{r}
+predicted <- predict(model, test, type="response")
+df_pred <- cbind(test, predicted)
+
+df_pred[,c('player_display_name', 'season', 'mvp', 'predicted', 'tot_td_rank', 'tot_yard_rank', 'epa_rank', 'win_rank', 'sov', 'avg_comp_pct', 'ints')] %>%
+  group_by(season) %>%
+  filter(predicted == max(predicted, na.rm=TRUE)) %>%
+  rbind(test[test$mvp == 1,]) %>%
+  filter(mvp == 0, na.rm=TRUE) %>%
+  arrange(season)
+```
+The model predicts the wrong MVP 5/18 years, meaning it is only 72.22% accurate. The majority of the incorrect predictions are players who received MVP votes that year. For example, Drew Brees received 15% of the votes for MVP in 2009. The exception is Carson Palmer, who lead the league in EPA in 2015 and was likely selected for that reason.
+
+All that remains is to apply the model to the 2024 data and see who is predicted as this year's MVP.  
+```{r}
+predicted <- round(predict(model, df[df$season == 2024,], type="response"), 4)
+mvp24 <- cbind(df[df$season == 2024,], predicted)
+
+mvp24[, c('player_display_name', 'recent_team', 'predicted', 'tot_td_rank', 'tot_yard_rank', 'epa_rank', 'win_rank', 'sov', 'avg_comp_pct', 'ints')] %>%
+  filter(predicted >= 0.2, na.rm=TRUE) %>%
+  arrange(-predicted)
+```
+With 73.5% certainty, the model predicts Lamar Jackson of the Baltimore Ravens to be the 2024 QB MVP. While he did not lead in the model's two most important stats - epa_rank and win_rank - he led in total touchdowns, had fewer interceptions, and led his team to greater SOV than Jared Goff and Josh Allen. It is important to note that the MVP vote and my analysis consider only a quarterback's regular season performance.
+
+<hr />
+
+Sources
+<ol>
+  <li>Predicting the Quarterback-MVP <a href='https://wsb.wharton.upenn.edu/wp-content/uploads/2022/09/2022_Football_Brill_PredictingMVP.pdf'>https://wsb.wharton.upenn.edu/wp-content/uploads/2022/09/2022_Football_Brill_PredictingMVP.pdf</li>
+  <li>nflreadr <a href='https://nflreadr.nflverse.com/reference/index.html'>https://nflreadr.nflverse.com/reference/index.html</a></li>
+  <li>What is strength of victory in the NFL? <a href='https://www.sportskeeda.com/nfl/what-strength-victory-nfl-exploring-method-used-determine-playoff-teams-case-tiebreak'>https://www.sportskeeda.com/nfl/what-strength-victory-nfl-exploring-method-used-determine-playoff-teams-case-tiebreak</a>
+</ol>
