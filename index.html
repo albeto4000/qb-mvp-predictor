@@ -12,11 +12,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.3.1/dist/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
 <!-- Bootswatch CSS -->
 <link rel="stylesheet" href="css/bootstrap.css">
-
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-
-
 <title>2024 NFL MVP Predictor</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
@@ -1733,20 +1729,9 @@ display: none;
 <body>
 
 <!-- Standard Site Navbar -->
-<nav class="navbar navbar-dark bg-dark pt-3 pb-2 px-3 justify-content">
-  <a class="navbar-brand text-success" href="https://albeto4000.github.io/">MATTHEW DOLIN</a>
-  <div>
-    <div class="navbar-text">
-      NFL QB-MVP Predictor
-    </div>
-  </div>
-  <button class="btn btn-outline-success btn-sm" data-toggle="modal" data-target="#aboutModal">About</button>
-</nav>
+<script src="nav.js"></script>
 
 <div class="container-fluid main-container">
-
-
-
 
 <div id="header">
 
@@ -2102,28 +2087,6 @@ What is strength of victory in the NFL?
 
 
 
-</div>
-
-<!-- 'About' Modal -->
-<div class="modal fade" id="aboutModal" tabindex="-1" role="dialog" aria-labelledby="aboutModal" aria-hidden="true">
-  <div class="modal-dialog" role="document">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">About "NFL QB-MVP Predictor"</h5>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-          <span aria-hidden="true">&times;</span>
-        </button>
-      </div>
-      <div class="modal-body">
-        This project was inspired by Ryan Brill and Ryan Weisman's paper "Predicting the Quarterback-MVP", as well as the close MVP race between Lamar Jackson and Josh Allen in 2024. The code, written in R, loads NFL stats from 2003-2024 and trains a logistic regression model that predicts each player's likelihood of being awarded most valuable player. The model makes its predictions based on each quarterback's total touchdowns, yards rushed/threw for, expected points added, and total wins compared to other quarterbacks, as well as their total interceptions, their team's strength of victory, and their average completion percentage. 
-        <br /><br />
-        I invite anyone to pull my code - accessible publicly on <a href='https://github.com/albeto4000/qb-mvp-predictor'>GitHub</a> - and play around with the model to see how the results change as variables are added or removed.
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
-      </div>
-    </div>
-  </div>
 </div>
 
 <script>
